@@ -5,6 +5,9 @@ export interface ScanProgress {
   skipped: number;
   currentDir: string;
   elapsedMs: number;
+  root: string;
+  topFiles: FileOut[];
+  topFolders: FolderOut[];
 }
 
 export interface TypeStat {
@@ -18,6 +21,7 @@ export interface FileOut {
   name: string;
   size: number;
   modifiedMs: number;
+  createdMs: number;
 }
 
 export interface FolderOut {
@@ -28,6 +32,7 @@ export interface FolderOut {
 
 export interface ScanSummary {
   cancelled: boolean;
+  root: string;
   totalBytes: number;
   fileCount: number;
   dirCount: number;
@@ -40,3 +45,29 @@ export interface ScanSummary {
   topFiles: FileOut[];
   topFolders: FolderOut[];
 }
+
+export interface DriveInfo {
+  letter: string;
+  root: string;
+  driveType: string;
+  totalBytes: number;
+  freeBytes: number;
+  usedBytes: number;
+}
+
+export type ItemKind = "file" | "folder";
+
+/** One row shared by the table and the chart. */
+export interface HogItem {
+  path: string;
+  name: string;
+  size: number;
+  kind: ItemKind;
+  /** 0 for folders (not tracked). */
+  modifiedMs: number;
+  createdMs: number;
+}
+
+export type Tab = "files" | "folders" | "both";
+export type TopN = 10 | 25 | 50 | 100;
+export type ChartType = "bar" | "donut";

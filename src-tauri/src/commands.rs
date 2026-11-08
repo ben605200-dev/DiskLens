@@ -64,3 +64,28 @@ pub fn scan_cancel(state: State<'_, ScanState>) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Replaces the user profile prefix with `%USERPROFILE%`, so paths copied
+/// out of the app never expose the Windows username.
+#[tauri::command]
+pub fn mask_path(path: String) -> String {
+    let Ok(profile) = std::env::var("USERPROFILE") else {
+        return path;
+    };
+    match strip_prefix_ci(&path, &profile) {
+        Some(rest) => format!("%USERPROFILE%{rest}"),
+        None => path,
+    }
+}
+
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    if s.len() < prefix.len() || !s.is_char_boundary(prefix.len()) {
+        return None;
+    }
+    let head = &s[..prefix.len()];
+    if head.to_lowercase() == prefix.to_lowercase() {
+        Some(&s[prefix.len()..])
+    } else {
+        None
+    }
+}

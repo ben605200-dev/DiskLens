@@ -56,6 +56,11 @@ pub struct ScanProgress {
     pub skipped: u64,
     pub current_dir: String,
     pub elapsed_ms: u64,
+    /// Canonical path being scanned (verbatim prefix stripped).
+    pub root: String,
+    /// Best-so-far top-N previews so the UI can update live while scanning.
+    pub top_files: Vec<FileOut>,
+    pub top_folders: Vec<FolderOut>,
 }
 
 /// One file extension bucket of the size-per-type summary.
@@ -75,6 +80,7 @@ pub struct FileOut {
     pub name: String,
     pub size: u64,
     pub modified_ms: i64,
+    pub created_ms: i64,
 }
 
 /// A folder in the top-N largest-folders list (ranked by total subtree size).
@@ -92,6 +98,8 @@ pub struct FolderOut {
 #[serde(rename_all = "camelCase")]
 pub struct ScanSummary {
     pub cancelled: bool,
+    /// Canonical path that was scanned (verbatim prefix stripped).
+    pub root: String,
     pub total_bytes: u64,
     pub file_count: u64,
     pub dir_count: u64,
@@ -115,6 +123,7 @@ struct EntryInfo {
     vol: u32,
     idx: u64,
     modified_ms: i64,
+    created_ms: i64,
 }
 
 /// Client state type for jwalk: (read-dir state, per-entry state).
@@ -216,6 +225,7 @@ struct TopFile {
     size: u64,
     idx: u32,
     modified_ms: i64,
+    created_ms: i64,
 }
 
 impl Ord for TopFile {
@@ -248,10 +258,12 @@ struct ScanCtx {
     cancelled: bool,
     last_emit: Instant,
     last_dir: std::sync::Arc<Path>,
+    /// Canonical scan root, for display and payloads.
+    root: String,
 }
 
 impl ScanCtx {
-    fn new(start: Instant) -> Self {
+    fn new(start: Instant, root: String) -> Self {
         ScanCtx {
             tree: Tree::new(),
             stack: Vec::new(),
@@ -268,6 +280,7 @@ impl ScanCtx {
             cancelled: false,
             last_emit: start,
             last_dir: std::sync::Arc::from(Path::new("")),
+            root,
         }
     }
 
@@ -279,7 +292,47 @@ impl ScanCtx {
             skipped: self.skipped_count,
             current_dir: strip_verbatim(&self.last_dir.to_string_lossy()),
             elapsed_ms: start.elapsed().as_millis() as u64,
+            root: self.root.clone(),
+            top_files: self.file_preview(),
+            top_folders: self.folder_preview(),
         }
+    }
+
+    /// Top-N largest files seen so far (used for live progress payloads).
+    fn file_preview(&self) -> Vec<FileOut> {
+        let mut items: Vec<&TopFile> = self.top_files.iter().map(|r| &r.0).collect();
+        items.sort_by(|a, b| b.size.cmp(&a.size).then(a.idx.cmp(&b.idx)));
+        items
+            .into_iter()
+            .map(|f| FileOut {
+                path: self.tree.path_of(f.idx),
+                name: self.tree.name(f.idx).to_string(),
+                size: f.size,
+                modified_ms: f.modified_ms,
+                created_ms: f.created_ms,
+            })
+            .collect()
+    }
+
+    /// Top-N largest folders by current subtree totals.
+    fn folder_preview(&self) -> Vec<FolderOut> {
+        let mut heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
+        for (i, node) in self.tree.nodes.iter().enumerate() {
+            if node.kind == KIND_DIR {
+                heap.push(Reverse((node.size, i as u32)));
+                if heap.len() > TOP_N {
+                    heap.pop();
+                }
+            }
+        }
+        heap.into_sorted_vec()
+            .into_iter()
+            .map(|Reverse((size, idx))| FolderOut {
+                path: self.tree.path_of(idx),
+                name: self.tree.name(idx).to_string(),
+                size,
+            })
+            .collect()
     }
 
     /// Handles one yielded entry. Entries arrive in strict depth-first
@@ -350,10 +403,19 @@ impl ScanCtx {
                 if cloud { FLAG_CLOUD } else { 0 },
                 info.size,
             );
+            // Keep every ancestor folder's total current, so live previews
+            // and the final summary both have up-to-date folder sizes.
+            let mut ancestor = parent;
+            while ancestor != NO_INDEX {
+                let node = &mut self.tree.nodes[ancestor as usize];
+                node.size += info.size;
+                ancestor = node.parent;
+            }
             self.top_files.push(Reverse(TopFile {
                 size: info.size,
                 idx,
                 modified_ms: info.modified_ms,
+                created_ms: info.created_ms,
             }));
             if self.top_files.len() > TOP_N {
                 self.top_files.pop();
@@ -361,19 +423,11 @@ impl ScanCtx {
         }
     }
 
-    /// Finalizes folder totals (subtree sizes) and builds the summary.
-    fn finish(mut self, elapsed_ms: u64) -> ScanSummary {
-        // Pre-order guarantees parents always have a lower index than any
-        // descendant, so a single reverse pass accumulates every folder's
-        // total subtree size.
-        let nodes = &mut self.tree.nodes;
-        for i in (1..nodes.len()).rev() {
-            let parent = nodes[i].parent;
-            if parent != NO_INDEX {
-                let size = nodes[i].size;
-                nodes[parent as usize].size += size;
-            }
-        }
+    /// Builds the final summary. Folder totals were kept up to date
+    /// incrementally while files were added.
+    fn finish(self, elapsed_ms: u64) -> ScanSummary {
+        let root = self.root.clone();
+        let top_folders = self.folder_preview();
 
         let mut by_type: Vec<TypeStat> = self
             .by_type
@@ -391,30 +445,13 @@ impl ScanCtx {
                 name: self.tree.name(f.idx).to_string(),
                 size: f.size,
                 modified_ms: f.modified_ms,
-            })
-            .collect();
-
-        let mut folder_heap: BinaryHeap<Reverse<(u64, u32)>> = BinaryHeap::new();
-        for (i, node) in self.tree.nodes.iter().enumerate() {
-            if node.kind == KIND_DIR {
-                folder_heap.push(Reverse((node.size, i as u32)));
-                if folder_heap.len() > TOP_N {
-                    folder_heap.pop();
-                }
-            }
-        }
-        let folders = folder_heap.into_sorted_vec();
-        let top_folders = folders
-            .into_iter()
-            .map(|Reverse((size, idx))| FolderOut {
-                path: self.tree.path_of(idx),
-                name: self.tree.name(idx).to_string(),
-                size,
+                created_ms: f.created_ms,
             })
             .collect();
 
         ScanSummary {
             cancelled: self.cancelled,
+            root,
             total_bytes: self.bytes_counted,
             file_count: self.file_count,
             dir_count: self.dir_count,
@@ -448,7 +485,7 @@ where
     }
 
     let start = Instant::now();
-    let mut ctx = ScanCtx::new(start);
+    let mut ctx = ScanCtx::new(start, strip_verbatim(&root.to_string_lossy()));
 
     if cancel.load(AtomicOrdering::Relaxed) {
         ctx.cancelled = true;
@@ -534,6 +571,10 @@ fn probe_file(path: &Path) -> EntryInfo {
                         ((info.ftLastWriteTime.dwHighDateTime as u64) << 32)
                             | info.ftLastWriteTime.dwLowDateTime as u64,
                     ),
+                    created_ms: filetime_to_millis(
+                        ((info.ftCreationTime.dwHighDateTime as u64) << 32)
+                            | info.ftCreationTime.dwLowDateTime as u64,
+                    ),
                 };
             }
         }
@@ -547,12 +588,8 @@ fn probe_file(path: &Path) -> EntryInfo {
             links: 1,
             vol: 0,
             idx: 0,
-            modified_ms: md
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0),
+            modified_ms: system_time_to_millis(md.modified().ok()),
+            created_ms: system_time_to_millis(md.created().ok()),
         },
         Err(_) => EntryInfo::default(),
     }
@@ -582,6 +619,12 @@ fn filetime_to_millis(filetime: u64) -> i64 {
         return 0;
     }
     (filetime / 10_000) as i64 - 11_644_473_600_000
+}
+
+fn system_time_to_millis(time: Option<std::time::SystemTime>) -> i64 {
+    time.and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Removes the `\\?\` / `\\?\UNC\` prefix for display.

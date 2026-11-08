@@ -7,7 +7,9 @@ use std::process::Command as StdCommand;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use disklens_lib::scanner::{ScanSummary, scan};
+use disklens_lib::commands::mask_path;
+use disklens_lib::drives::list_drives;
+use disklens_lib::scanner::{ScanProgress, ScanSummary, scan};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -281,21 +283,58 @@ fn scanning_a_missing_path_returns_an_error() {
 }
 
 #[test]
-fn progress_callback_reports_running_totals() {
+fn progress_callback_reports_running_totals_and_previews() {
     let td = TestDir::new("progress");
     td.write("x.bin", 300);
 
-    let seen: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+    let seen: Mutex<Vec<ScanProgress>> = Mutex::new(Vec::new());
     let cancel = AtomicBool::new(false);
     let s = scan(td.path(), &cancel, |p| {
-        seen.lock().unwrap().push((p.files, p.bytes));
+        seen.lock().unwrap().push(p.clone());
     })
     .unwrap();
 
     let seen = seen.into_inner().unwrap();
     assert!(!seen.is_empty(), "at least the final progress is reported");
-    let (files, bytes) = *seen.last().unwrap();
-    assert_eq!(files, 1);
-    assert_eq!(bytes, 300);
+    let last = seen.last().unwrap();
+    assert_eq!(last.files, 1);
+    assert_eq!(last.bytes, 300);
+    assert!(!last.root.is_empty(), "progress should carry the scan root");
+    assert_eq!(last.top_files.len(), 1);
+    assert_eq!(last.top_files[0].name, "x.bin");
+    assert_eq!(last.top_files[0].size, 300);
+    assert_eq!(
+        last.top_folders[0].path, last.root,
+        "the root folder should be the largest folder so far"
+    );
     assert_eq!(s.file_count, 1);
+}
+
+#[test]
+fn drives_report_capacity() {
+    let drives = list_drives();
+    assert!(!drives.is_empty(), "expected at least one drive");
+    for d in &drives {
+        assert_eq!(d.letter.len(), 2, "drive letters look like \"C:\"");
+        assert!(d.total_bytes > 0);
+        assert_eq!(
+            d.used_bytes + d.free_bytes,
+            d.total_bytes,
+            "used + free should equal total"
+        );
+    }
+}
+
+#[test]
+fn mask_path_hides_the_user_profile() {
+    let profile = std::env::var("USERPROFILE").expect("USERPROFILE is set on Windows");
+    let masked = mask_path(format!("{profile}\\Documents\\report.pdf"));
+    assert!(
+        masked.starts_with("%USERPROFILE%"),
+        "profile prefix not masked"
+    );
+    assert!(masked.ends_with("\\Documents\\report.pdf"));
+
+    let untouched = mask_path("D:\\Other\\x.txt".to_string());
+    assert_eq!(untouched, "D:\\Other\\x.txt");
 }

@@ -12,7 +12,7 @@ Stack: Tauri + Rust (jwalk scanner) + React + TypeScript + Tailwind; charts: rec
 ## Tasks
 - [x] Step 0: Save AGENTS.md + PLAN.md, wait for "approved".
 - [x] Task 1: Scaffold Tauri/React/TS/Tailwind and build the parallel jwalk scanner: progress events, ~1s cancel, compact tree, top-N lists, Windows rules, summary + tests.
-- [ ] Task 2: Top Space Hogs table + bar/donut graphs (recharts), tabs, Top-N selector, filters, detail panel, hover/click linking, throttled live updates.
+- [x] Task 2: Top Space Hogs table + bar/donut graphs (recharts), tabs, Top-N selector, filters, detail panel, hover/click linking, throttled live updates.
 - [ ] Task 3: Dashboard summary cards + d3 treemap (drill-in, breadcrumbs, "Other" grouping, tooltips, color-blind-safe palette with non-color cues).
 - [ ] Task 4: Settings page (theme, accent, density, units, defaults, excluded paths, font size, reduce motion) with CSS variables; Win11 look, keyboard nav, accessible contrast.
 - [ ] Task 5: Community files (README, LICENSE, CODE_OF_CONDUCT, CONTRIBUTING, SECURITY, PRIVACY, .gitignore), GitHub templates, CI (windows-latest + gitleaks), protect-main script, repo privacy scan.
