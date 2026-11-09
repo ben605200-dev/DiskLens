@@ -18,6 +18,8 @@ pub fn run() {
             commands::scan_cancel,
             commands::list_children,
             commands::mask_path,
+            commands::is_elevated,
+            commands::restart_as_admin,
             drives::list_drives,
             settings::load_settings,
             settings::save_settings

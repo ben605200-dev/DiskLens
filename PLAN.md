@@ -16,7 +16,7 @@ Stack: Tauri + Rust (jwalk scanner) + React + TypeScript + Tailwind; charts: rec
 - [x] Task 3: Dashboard summary cards + d3 treemap (drill-in, breadcrumbs, "Other" grouping, tooltips, color-blind-safe palette with non-color cues).
 - [x] Task 4: Settings page (theme, accent, density, units, defaults, excluded paths, font size, reduce motion) with CSS variables; Win11 look, keyboard nav, accessible contrast.
 - [x] Task 5: Community files (README, LICENSE, CODE_OF_CONDUCT, CONTRIBUTING, SECURITY, PRIVACY, .gitignore), GitHub templates, CI (windows-latest + gitleaks), protect-main script, repo privacy scan.
-- [ ] Task 6: NSIS installer + portable build, restart-as-admin button, 1M-file fake-tree benchmark, empty/loading/error states, fix build warnings.
+- [x] Task 6: NSIS installer + portable build, restart-as-admin button, 1M-file fake-tree benchmark, empty/loading/error states, fix build warnings.
 
 ## Assumptions
 - Rust and Node.js are installed on the Windows 11 dev machine (I will check and report before building).

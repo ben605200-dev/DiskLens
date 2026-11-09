@@ -26,8 +26,9 @@ Requirements: Windows 11, [Rust](https://rustup.rs) (MSVC toolchain),
 
 ```powershell
 npm install
-npm run tauri dev      # run the app in development
-npm run tauri build    # build the NSIS installer and the portable executable
+npm run tauri dev         # run the app in development
+npm run build:installer   # NSIS installer  -> src-tauri/target/release/bundle/nsis/
+npm run build:portable    # portable exe    -> src-tauri/target/release/disklens.exe
 ```
 
 Run the tests:

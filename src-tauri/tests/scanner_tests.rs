@@ -401,6 +401,13 @@ fn list_children_lists_direct_children_biggest_first() {
 }
 
 #[test]
+fn elevation_check_returns_without_crashing() {
+    // Works elevated and non-elevated; must never panic or hang.
+    let elevated = disklens_lib::commands::is_elevated();
+    let _ = elevated;
+}
+
+#[test]
 fn drives_report_capacity() {
     let drives = list_drives();
     assert!(!drives.is_empty(), "expected at least one drive");

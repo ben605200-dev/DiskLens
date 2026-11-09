@@ -58,6 +58,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef(settings);
   const saveTimer = useRef<number | null>(null);
+  const [elevated, setElevated] = useState<boolean | null>(null);
 
   const loadDrives = useCallback(async () => {
     try {
@@ -71,6 +72,13 @@ export default function App() {
   useEffect(() => {
     void loadDrives();
   }, [loadDrives]);
+
+  // Administrator status, for the "restart as administrator" banner.
+  useEffect(() => {
+    invoke<boolean>("is_elevated")
+      .then(setElevated)
+      .catch(() => setElevated(null));
+  }, []);
 
   // Load saved settings once and adopt the defaults that apply right away.
   useEffect(() => {
@@ -144,6 +152,14 @@ export default function App() {
       await invoke("scan_cancel");
     } catch {
       // nothing to do
+    }
+  }
+
+  async function restartAsAdmin() {
+    try {
+      await invoke("restart_as_admin");
+    } catch (err) {
+      setError(String(err));
     }
   }
 
@@ -297,6 +313,22 @@ export default function App() {
         </div>
       </header>
 
+      {elevated === false && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-neutral-700 bg-neutral-900/60 px-3 py-2 text-xs">
+          <span>
+            Running without administrator rights: some system folders will be skipped and counted
+            under "Skipped". Restarting shows the Windows permission prompt first - nothing happens
+            unless you allow it.
+          </span>
+          <button
+            className="rounded-md border border-neutral-700 px-3 py-1.5 hover:bg-neutral-800"
+            onClick={() => void restartAsAdmin()}
+          >
+            Restart as administrator
+          </button>
+        </div>
+      )}
+
       {showSettings && (
         <SettingsPage
           settings={settings}
@@ -330,7 +362,7 @@ export default function App() {
               </button>
             </div>
             {error && (
-              <div className="rounded-md border border-red-900 bg-red-950/50 p-3 text-sm">{error}</div>
+              <div role="alert" className="rounded-md border border-red-900 bg-red-950/50 p-3 text-sm">{error}</div>
             )}
           </section>
         </>
@@ -369,7 +401,7 @@ export default function App() {
           </div>
 
           {error && (
-            <div className="rounded-md border border-red-900 bg-red-950/50 p-3 text-sm">{error}</div>
+            <div role="alert" className="rounded-md border border-red-900 bg-red-950/50 p-3 text-sm">{error}</div>
           )}
 
           <div className="flex items-center justify-between gap-2">

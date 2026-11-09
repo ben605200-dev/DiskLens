@@ -2,11 +2,16 @@
 //! a plain background thread and reports back via events, so the UI never
 //! blocks and the full file list never crosses the IPC boundary.
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter, State};
+
+use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TokenElevation};
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
 
 use crate::scanner::{self, LastScan};
 
@@ -100,6 +105,59 @@ pub fn mask_path(path: String) -> String {
         Some(rest) => format!("%USERPROFILE%{rest}"),
         None => path,
     }
+}
+
+/// True when the app is running with administrator rights.
+#[tauri::command]
+pub fn is_elevated() -> bool {
+    unsafe {
+        // The pseudo-handle for the current process token: what
+        // GetCurrentProcessToken() returns ((HANDLE)(LONG_PTR)-4). It must
+        // never be closed.
+        let process_token = (-4isize) as HANDLE;
+        let mut elevation: TOKEN_ELEVATION = std::mem::zeroed();
+        let mut size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let ok = GetTokenInformation(
+            process_token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut _,
+            size,
+            &mut size,
+        );
+        ok != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+/// Relaunches the app elevated. Windows always shows its own UAC consent
+/// prompt - the app never elevates silently - and the current instance only
+/// exits after the elevated instance has been started.
+#[tauri::command]
+pub fn restart_as_admin(app: AppHandle) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let operation: Vec<u16> = "runas".encode_utf16().chain(std::iter::once(0)).collect();
+    let file: Vec<u16> = exe
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // 1 = SW_SHOWNORMAL. A return value <= 32 means the launch failed or the
+    // user dismissed the UAC prompt.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if result as isize <= 32 {
+        return Err("Elevation was cancelled.".to_string());
+    }
+    app.exit(0);
+    Ok(())
 }
 
 fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
