@@ -17,7 +17,7 @@ interface Props {
 }
 
 const inputClass =
-  "rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 outline-none focus:border-sky-600";
+  "rounded-md border border-neutral-700 bg-neutral-900 px-2 py-[var(--dl-ctl-py)] outline-none focus:border-sky-600";
 
 export default function Filters(props: Props) {
   return (
@@ -27,8 +27,10 @@ export default function Filters(props: Props) {
           <button
             key={t}
             onClick={() => props.setTab(t)}
-            className={`px-3 py-1.5 capitalize ${
-              props.tab === t ? "bg-sky-600" : "bg-neutral-900 hover:bg-neutral-800"
+            className={`px-3 py-[var(--dl-ctl-py)] capitalize ${
+              props.tab === t
+                ? "bg-sky-600 text-on-accent"
+                : "bg-neutral-900 hover:bg-neutral-800"
             }`}
           >
             {t}

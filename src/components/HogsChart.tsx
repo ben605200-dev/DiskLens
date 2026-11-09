@@ -122,7 +122,7 @@ function BarView({
           dataKey="name"
           width={150}
           tickFormatter={(value: string) => (value.length > 22 ? `${value.slice(0, 21)}…` : value)}
-          tick={{ fontSize: 11, fill: "#cbd5e1" }}
+          tick={{ fontSize: 11, fill: "#64748b" }}
         />
         <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(255,255,255,0.06)" }} />
         <Bar
@@ -148,7 +148,7 @@ function BarView({
             dataKey="rawSize"
             position="right"
             formatter={(value) => formatBytes(Number(value ?? 0))}
-            style={{ fontSize: 11, fill: "#cbd5e1" }}
+            style={{ fontSize: 11, fill: "#64748b" }}
           />
         </Bar>
       </BarChart>
@@ -196,8 +196,7 @@ function DonutView({
               outerRadius={105}
               paddingAngle={1}
               isAnimationActive={false}
-              stroke="#0a0a0a"
-              strokeWidth={1}
+              stroke="none"
               onMouseEnter={(_, index) => onHover(slices[index]?.item ? slices[index].key : null)}
               onMouseLeave={() => onHover(null)}
               onClick={(_, index) => {
@@ -230,9 +229,9 @@ function DonutView({
             onMouseEnter={() => slice.item && onHover(slice.key)}
             onMouseLeave={() => onHover(null)}
             onClick={() => slice.item && onSelect(slice.item)}
-            className={`flex items-center gap-2 rounded px-1 py-0.5 ${
-              hoveredPath === slice.key ? "bg-white/10" : ""
-            } ${slice.item ? "cursor-pointer hover:bg-white/5" : ""}`}
+            className={`flex items-center gap-2 rounded px-1 py-[var(--dl-row-py)] ${
+              hoveredPath === slice.key ? "bg-[var(--dl-hover-strong)]" : ""
+            } ${slice.item ? "cursor-pointer hover:bg-[var(--dl-hover)]" : ""}`}
           >
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: slice.fill }} />
             <span className="flex-1 truncate" title={slice.item?.path ?? slice.name}>

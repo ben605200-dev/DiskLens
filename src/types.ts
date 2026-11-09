@@ -80,3 +80,17 @@ export interface HogItem {
 export type Tab = "files" | "folders" | "both";
 export type TopN = 10 | 25 | 50 | 100;
 export type ChartType = "bar" | "donut";
+
+/** Mirrors the Rust Settings struct (settings.json in the app-data folder). */
+export interface Settings {
+  theme: "system" | "dark" | "light";
+  accent: string;
+  density: "comfortable" | "compact";
+  sizeUnits: "binary" | "decimal";
+  defaultView: "dashboard" | "details";
+  defaultTopN: TopN;
+  defaultGraph: ChartType;
+  excludedPaths: string[];
+  fontSize: number;
+  reduceMotion: boolean;
+}

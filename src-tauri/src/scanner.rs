@@ -576,11 +576,13 @@ fn store_last_scan(last_scan: &Option<Arc<LastScan>>, tree: Tree) {
 /// (on the calling thread) with a small snapshot; `cancel` stops the walk
 /// within about a second. Returns partial results when cancelled. When
 /// `last_scan` is given, the finished tree is stored there for drill-in.
+/// Folders under `excluded_paths` are skipped entirely.
 pub fn scan<F>(
     root: &Path,
     cancel: &AtomicBool,
     on_progress: F,
     last_scan: Option<Arc<LastScan>>,
+    excluded_paths: &[String],
 ) -> io::Result<ScanSummary>
 where
     F: Fn(&ScanProgress),
@@ -592,6 +594,14 @@ where
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "path is not a folder",
+        ));
+    }
+
+    let excluded = normalize_excluded(excluded_paths);
+    if is_excluded(&root.to_string_lossy(), &excluded) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "this folder is excluded in settings",
         ));
     }
 
@@ -608,7 +618,25 @@ where
     let walk = WalkDirGeneric::<WalkClientState>::new(&root)
         .skip_hidden(false)
         .follow_links(false)
-        .process_read_dir(process_children);
+        .process_read_dir(
+            move |_depth: Option<usize>,
+                  _path: &Path,
+                  _state: &mut (),
+                  children: &mut Vec<jwalk::Result<DirEntry<WalkClientState>>>| {
+                if !excluded.is_empty() {
+                    // Excluded folders vanish from the walk entirely.
+                    children.retain(|child| match child {
+                        Ok(entry) => {
+                            !(entry.file_type().is_dir()
+                                && !entry.file_type().is_symlink()
+                                && is_excluded(&entry.path().to_string_lossy(), &excluded))
+                        }
+                        Err(_) => true,
+                    });
+                }
+                process_children(children);
+            },
+        );
 
     for item in walk {
         if cancel.load(AtomicOrdering::Relaxed) {
@@ -632,22 +660,46 @@ where
     Ok(summary)
 }
 
-/// Runs for every directory in parallel, before its children are read.
-/// Plain files are inspected once, here, so the serial consumer does no I/O.
+/// Inspects the plain files of one directory (in parallel, before its
+/// children are read) so the serial consumer does no I/O.
 /// Junctions/symlinks are never descended by jwalk (and are reported as
 /// symlinks by std), so their `read_children` stays None on its own.
-fn process_children(
-    _depth: Option<usize>,
-    _path: &Path,
-    _state: &mut (),
-    children: &mut Vec<jwalk::Result<DirEntry<WalkClientState>>>,
-) {
+fn process_children(children: &mut Vec<jwalk::Result<DirEntry<WalkClientState>>>) {
     for child in children.iter_mut() {
         let Ok(entry) = child else { continue };
         if !entry.file_type().is_dir() && !entry.file_type().is_symlink() {
             entry.client_state = Some(probe_file(&entry.path()));
         }
     }
+}
+
+/// Lower-cased, verbatim-prefixed forms of the excluded paths. The walk's
+/// entry paths are verbatim too because the scan root is canonicalized.
+fn normalize_excluded(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|p| {
+            let lower = p.trim_end_matches(['\\', '/']).to_lowercase();
+            if lower.starts_with(r"\\?\") {
+                lower
+            } else if let Some(rest) = lower.strip_prefix(r"\\") {
+                format!(r"\\?\unc\{rest}")
+            } else {
+                format!(r"\\?\{lower}")
+            }
+        })
+        .collect()
+}
+
+/// True when `path` equals or sits under any excluded path.
+fn is_excluded(path: &str, excluded: &[String]) -> bool {
+    let lower = path.trim_end_matches(['\\', '/']).to_lowercase();
+    excluded.iter().any(|ex| {
+        lower == *ex
+            || (lower.len() > ex.len()
+                && lower.starts_with(ex.as_str())
+                && lower.as_bytes()[ex.len()] == b'\\')
+    })
 }
 
 /// One metadata read per file via a handle that never reads content:

@@ -1,13 +1,24 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ChartType, DriveInfo, HogItem, ScanProgress, ScanSummary, Tab, TopN } from "./types";
+import type {
+  ChartType,
+  DriveInfo,
+  HogItem,
+  ScanProgress,
+  ScanSummary,
+  Settings,
+  Tab,
+  TopN,
+} from "./types";
 import DrivePicker from "./components/DrivePicker";
 import Filters from "./components/Filters";
 import HogsTable from "./components/HogsTable";
 import DetailPanel from "./components/DetailPanel";
+import SettingsPage from "./components/SettingsPage";
 import { extOf } from "./lib/fileTypes";
 import { formatBytes, formatElapsed } from "./lib/format";
+import { DEFAULT_SETTINGS, applySettings } from "./lib/settings";
 
 // Charts and the treemap (recharts + d3 are heavy) are only loaded
 // once results exist, which keeps the start screen light.
@@ -42,6 +53,12 @@ export default function App() {
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [rootView, setRootView] = useState<"dashboard" | "details">("dashboard");
 
+  // Settings (persisted by the backend in the app-data folder)
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = useRef(settings);
+  const saveTimer = useRef<number | null>(null);
+
   const loadDrives = useCallback(async () => {
     try {
       setDrives(await invoke<DriveInfo[]>("list_drives"));
@@ -55,6 +72,32 @@ export default function App() {
     void loadDrives();
   }, [loadDrives]);
 
+  // Load saved settings once and adopt the defaults that apply right away.
+  useEffect(() => {
+    invoke<Settings>("load_settings")
+      .then((loaded) => {
+        setSettings(loaded);
+        setTopN(loaded.defaultTopN);
+        setChartType(loaded.defaultGraph);
+        setRootView(loaded.defaultView);
+      })
+      .catch(() => {
+        /* fall back to defaults silently */
+      });
+  }, []);
+
+  // Push settings into the CSS variables; follow the OS theme when asked.
+  useEffect(() => {
+    settingsRef.current = settings;
+    applySettings(settings);
+    if (settings.theme === "system") {
+      const media = window.matchMedia("(prefers-color-scheme: light)");
+      const listener = () => applySettings(settingsRef.current);
+      media.addEventListener("change", listener);
+      return () => media.removeEventListener("change", listener);
+    }
+  }, [settings]);
+
   useEffect(() => {
     const unlisteners: Promise<UnlistenFn>[] = [
       listen<ScanProgress>("scan-progress", (event) => setLive(event.payload)),
@@ -62,7 +105,7 @@ export default function App() {
         setSummary(event.payload);
         setLive(null);
         setScanning(false);
-        setRootView("dashboard");
+        setRootView(settingsRef.current.defaultView);
       }),
       listen<string>("scan-failed", (event) => {
         setError(event.payload);
@@ -85,7 +128,10 @@ export default function App() {
     setSelectedType(null);
     setScanning(true);
     try {
-      await invoke("scan_start", { path: targetPath });
+      await invoke("scan_start", {
+        path: targetPath,
+        excludedPaths: settings.excludedPaths,
+      });
       setPath(targetPath);
     } catch (err) {
       setError(String(err));
@@ -114,6 +160,21 @@ export default function App() {
   function applyTypeFilter(value: string) {
     setTypeFilter(value);
     setSelectedType(value === "all" ? null : value);
+  }
+
+  /** Applies a settings change immediately and saves it (debounced). */
+  function updateSettings(patch: Partial<Settings>) {
+    const next = { ...settingsRef.current, ...patch };
+    setSettings(next);
+    settingsRef.current = next;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      void invoke("save_settings", { settings: next }).catch((err) => setError(String(err)));
+    }, 400);
+    // Defaults also apply to the current view right away.
+    if (patch.defaultTopN !== undefined) setTopN(patch.defaultTopN);
+    if (patch.defaultGraph !== undefined) setChartType(patch.defaultGraph);
+    if (patch.defaultView !== undefined) setRootView(patch.defaultView);
   }
 
   // ----- derived data -----------------------------------------------------
@@ -214,18 +275,37 @@ export default function App() {
           <h1 className="text-xl font-semibold">DiskLens</h1>
           <span className="text-xs opacity-60">100% local - no telemetry, no network</span>
         </div>
-        {showResults && (
+        <div className="flex items-center gap-2">
+          {showResults && !showSettings && (
+            <button
+              className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs hover:bg-neutral-900"
+              onClick={newScan}
+              disabled={scanning}
+            >
+              New scan
+            </button>
+          )}
           <button
             className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs hover:bg-neutral-900"
-            onClick={newScan}
-            disabled={scanning}
+            onClick={() => {
+              setShowSettings((open) => !open);
+              setSelected(null);
+            }}
           >
-            New scan
+            {showSettings ? "Close settings" : "Settings"}
           </button>
-        )}
+        </div>
       </header>
 
-      {showStart && (
+      {showSettings && (
+        <SettingsPage
+          settings={settings}
+          onChange={updateSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showStart && !showSettings && (
         <>
           <DrivePicker drives={drives} onPick={(root) => void startScan(root)} onRefresh={() => void loadDrives()} />
           <section className="space-y-2">
@@ -242,7 +322,7 @@ export default function App() {
                 }}
               />
               <button
-                className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium disabled:opacity-40"
+                className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-40"
                 onClick={() => void startScan()}
                 disabled={path.trim() === ""}
               >
@@ -256,7 +336,7 @@ export default function App() {
         </>
       )}
 
-      {showResults && (
+      {showResults && !showSettings && (
         <>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm">
             {scanning ? (
@@ -300,7 +380,9 @@ export default function App() {
                   onClick={() => setRootView(view)}
                   disabled={scanning}
                   className={`px-3 py-1.5 capitalize disabled:opacity-40 ${
-                    rootView === view ? "bg-sky-600" : "bg-neutral-900 hover:bg-neutral-800"
+                    rootView === view
+                      ? "bg-sky-600 text-on-accent"
+                      : "bg-neutral-900 hover:bg-neutral-800"
                   }`}
                 >
                   {view}
@@ -377,7 +459,9 @@ export default function App() {
                         key={t}
                         onClick={() => setChartType(t)}
                         className={`px-3 py-1 capitalize ${
-                          chartType === t ? "bg-sky-600" : "bg-neutral-900 hover:bg-neutral-800"
+                          chartType === t
+                            ? "bg-sky-600 text-on-accent"
+                            : "bg-neutral-900 hover:bg-neutral-800"
                         }`}
                       >
                         {t}

@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod drives;
 pub mod scanner;
+pub mod settings;
 
 use commands::{LastScanState, ScanState};
 
@@ -17,7 +18,9 @@ pub fn run() {
             commands::scan_cancel,
             commands::list_children,
             commands::mask_path,
-            drives::list_drives
+            drives::list_drives,
+            settings::load_settings,
+            settings::save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

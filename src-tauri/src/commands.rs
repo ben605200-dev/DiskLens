@@ -25,6 +25,7 @@ pub async fn scan_start(
     state: State<'_, ScanState>,
     last_scan: State<'_, LastScanState>,
     path: String,
+    excluded_paths: Option<Vec<String>>,
 ) -> Result<(), String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
@@ -42,6 +43,7 @@ pub async fn scan_start(
     }
 
     let shared_tree = last_scan.0.clone();
+    let excluded = excluded_paths.unwrap_or_default();
     let app_handle = app.clone();
     std::thread::spawn(move || {
         let progress_app = app_handle.clone();
@@ -52,6 +54,7 @@ pub async fn scan_start(
                 let _ = progress_app.emit("scan-progress", progress);
             },
             Some(shared_tree),
+            &excluded,
         );
         match result {
             Ok(summary) => {

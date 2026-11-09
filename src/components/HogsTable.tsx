@@ -31,23 +31,30 @@ export default function HogsTable({ items, totalBytes, hoveredPath, onHover, onS
             return (
               <tr
                 key={item.path}
+                tabIndex={0}
                 onMouseEnter={() => onHover(item.path)}
                 onMouseLeave={() => onHover(null)}
                 onClick={() => onSelect(item)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(item);
+                  }
+                }}
                 className={`cursor-pointer border-t border-neutral-800/60 ${
-                  isHovered ? "bg-white/10" : "hover:bg-white/5"
+                  isHovered ? "bg-[var(--dl-hover-strong)]" : "hover:bg-[var(--dl-hover)]"
                 }`}
               >
-                <td className="px-2 py-1.5 text-right opacity-50">{index + 1}</td>
-                <td className="truncate px-2 py-1.5">
+                <td className="px-2 py-[var(--dl-row-py)] text-right opacity-50">{index + 1}</td>
+                <td className="truncate px-2 py-[var(--dl-row-py)]">
                   <span className="mr-1.5">{iconForItem(item)}</span>
                   <span title={item.path}>{item.name}</span>
                 </td>
-                <td className="truncate px-2 py-1.5 text-xs opacity-60" title={item.path}>
+                <td className="truncate px-2 py-[var(--dl-row-py)] text-xs opacity-60" title={item.path}>
                   {dirOf(item.path)}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{formatBytes(item.size)}</td>
-                <td className="px-2 py-1.5">
+                <td className="px-2 py-[var(--dl-row-py)] text-right tabular-nums">{formatBytes(item.size)}</td>
+                <td className="px-2 py-[var(--dl-row-py)]">
                   <div className="flex items-center gap-2">
                     <span className="w-10 shrink-0 text-right text-xs tabular-nums">
                       {formatPercent(item.size, totalBytes)}
@@ -60,7 +67,7 @@ export default function HogsTable({ items, totalBytes, hoveredPath, onHover, onS
                     </div>
                   </div>
                 </td>
-                <td className="px-2 py-1.5 text-xs opacity-70">
+                <td className="px-2 py-[var(--dl-row-py)] text-xs opacity-70">
                   {item.kind === "folder" ? "-" : formatDateTime(item.modifiedMs)}
                 </td>
               </tr>

@@ -47,10 +47,19 @@ export default function DetailPanel({ item, onClose }: Props) {
   const typeLabel = item.kind === "folder" ? "Folder" : ext ? `.${ext}` : "File";
 
   return (
-    <aside className="fixed inset-y-0 right-0 z-20 flex w-96 max-w-full flex-col gap-3 overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-4 text-sm shadow-2xl">
+    <aside
+      className="fixed inset-y-0 right-0 z-20 flex w-96 max-w-full flex-col gap-3 overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-4 text-sm shadow-2xl"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
       <div className="flex items-start justify-between gap-2">
         <h2 className="font-medium">Details</h2>
-        <button className="rounded px-2 py-0.5 text-xs opacity-70 hover:opacity-100" onClick={onClose}>
+        <button
+          autoFocus
+          className="rounded px-2 py-0.5 text-xs opacity-70 hover:opacity-100"
+          onClick={onClose}
+        >
           Close
         </button>
       </div>
@@ -68,7 +77,7 @@ export default function DetailPanel({ item, onClose }: Props) {
 
       <div className="flex gap-2 pt-1">
         <button
-          className="flex-1 rounded-md bg-sky-600 px-3 py-2 text-xs font-medium hover:bg-sky-500"
+          className="flex-1 rounded-md bg-sky-600 px-3 py-2 text-xs font-medium text-on-accent hover:opacity-90"
           onClick={reveal}
         >
           Reveal in File Explorer

@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use disklens_lib::commands::mask_path;
 use disklens_lib::drives::list_drives;
 use disklens_lib::scanner::{LastScan, ScanProgress, ScanSummary, scan};
+use disklens_lib::settings::{Settings, load_from, save_to};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -54,7 +55,7 @@ impl Drop for TestDir {
 
 fn run_scan(root: &Path) -> ScanSummary {
     let cancel = AtomicBool::new(false);
-    scan(root, &cancel, |_| {}, None).expect("scan failed")
+    scan(root, &cancel, |_| {}, None, &[]).expect("scan failed")
 }
 
 fn mklink_junction(link: &Path, target: &Path) -> bool {
@@ -271,7 +272,7 @@ fn cancellation_stops_the_scan() {
     }
 
     let cancel = AtomicBool::new(true); // already cancelled before starting
-    let s = scan(td.path(), &cancel, |_| {}, None).unwrap();
+    let s = scan(td.path(), &cancel, |_| {}, None, &[]).unwrap();
     assert!(s.cancelled);
     assert!(s.file_count < 100);
 }
@@ -280,7 +281,7 @@ fn cancellation_stops_the_scan() {
 fn scanning_a_missing_path_returns_an_error() {
     let cancel = AtomicBool::new(false);
     let missing = std::env::temp_dir().join("disklens-missing-path-for-test");
-    assert!(scan(&missing, &cancel, |_| {}, None).is_err());
+    assert!(scan(&missing, &cancel, |_| {}, None, &[]).is_err());
 }
 
 #[test]
@@ -297,6 +298,7 @@ fn progress_callback_reports_running_totals_and_previews() {
             seen.lock().unwrap().push(p.clone());
         },
         None,
+        &[],
     )
     .unwrap();
 
@@ -317,6 +319,55 @@ fn progress_callback_reports_running_totals_and_previews() {
 }
 
 #[test]
+fn excluded_folders_are_not_scanned() {
+    let td = TestDir::new("excluded");
+    td.write("keep.bin", 400);
+    td.write("skipme/big.bin", 5000);
+    let excluded = vec![td.path().join("skipme").to_string_lossy().to_string()];
+
+    let cancel = AtomicBool::new(false);
+    let s = scan(td.path(), &cancel, |_| {}, None, &excluded).unwrap();
+    assert_eq!(s.total_bytes, 400, "excluded folder contents were counted");
+    assert_eq!(s.file_count, 1);
+    assert_eq!(s.dir_count, 1, "only the root remains");
+
+    // The excluded folder itself cannot be scanned directly.
+    let blocked = scan(&td.path().join("skipme"), &cancel, |_| {}, None, &excluded);
+    assert!(blocked.is_err(), "scanning an excluded root should fail");
+}
+
+#[test]
+fn settings_roundtrip_and_corrupt_file_fallback() {
+    let td = TestDir::new("settings");
+    let file = td.path().join("settings.json");
+
+    // Missing file: defaults.
+    let defaults = load_from(&file);
+    assert_eq!(defaults.default_top_n, 25);
+    assert_eq!(defaults.theme, "system");
+    assert!(!defaults.reduce_motion);
+
+    // Roundtrip.
+    let mut custom = Settings::default();
+    custom.theme = "dark".to_string();
+    custom.default_top_n = 50;
+    custom.excluded_paths = vec!["C:\\Users\\Example\\Downloads\\junk".to_string()];
+    custom.reduce_motion = true;
+    save_to(&file, &custom).unwrap();
+    let loaded = load_from(&file);
+    assert_eq!(loaded.theme, "dark");
+    assert_eq!(loaded.default_top_n, 50);
+    assert_eq!(loaded.excluded_paths.len(), 1);
+    assert!(loaded.reduce_motion);
+
+    // Corrupt file: defaults again.
+    fs::write(&file, "{ not json").unwrap();
+    let recovered = load_from(&file);
+    assert_eq!(recovered.default_top_n, 25);
+    assert_eq!(recovered.excluded_paths.len(), 0);
+}
+
+#[test]
 fn list_children_lists_direct_children_biggest_first() {
     let td = TestDir::new("children");
     td.write("small.bin", 100);
@@ -327,7 +378,7 @@ fn list_children_lists_direct_children_biggest_first() {
     let last = Arc::new(LastScan::default());
     assert!(last.list_children("C:\\").is_err(), "no scan stored yet");
 
-    let s = scan(td.path(), &cancel, |_| {}, Some(last.clone())).unwrap();
+    let s = scan(td.path(), &cancel, |_| {}, Some(last.clone()), &[]).unwrap();
 
     let children = last.list_children(&s.root).unwrap();
     assert_eq!(children.len(), 3);

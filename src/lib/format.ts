@@ -1,12 +1,21 @@
+let sizeUnits: "binary" | "decimal" = "binary";
+
+/** Sets the size units used by every formatBytes call (KB/GB = 1000-based,
+ *  KiB/GiB = 1024-based). Set from the saved settings. */
+export function setSizeUnits(units: "binary" | "decimal"): void {
+  sizeUnits = units;
+}
+
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
+  const base = sizeUnits === "decimal" ? 1000 : 1024;
+  if (bytes < base) return `${bytes} B`;
+  const units = sizeUnits === "decimal" ? ["KB", "MB", "GB", "TB"] : ["KiB", "MiB", "GiB", "TiB"];
   let value = bytes;
   let unit = "B";
   for (const u of units) {
-    value /= 1024;
+    value /= base;
     unit = u;
-    if (value < 1024) break;
+    if (value < base) break;
   }
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${unit}`;
 }

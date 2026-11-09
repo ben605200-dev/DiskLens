@@ -98,8 +98,7 @@ export default function Dashboard({
                 outerRadius={85}
                 paddingAngle={1}
                 isAnimationActive={false}
-                stroke="#0a0a0a"
-                strokeWidth={1}
+                stroke="none"
                 onClick={(_, index) => {
                   const slice = slices[index];
                   if (slice?.ext) onSelectType(slice.ext === selectedType ? null : slice.ext);
@@ -119,8 +118,8 @@ export default function Dashboard({
               <Tooltip
                 formatter={(value) => formatBytes(Number(value ?? 0))}
                 contentStyle={{
-                  background: "#171717",
-                  border: "1px solid #404040",
+                  background: "var(--dl-neutral-900)",
+                  border: "1px solid var(--dl-neutral-700)",
                   borderRadius: 6,
                   fontSize: 12,
                 }}
@@ -141,9 +140,9 @@ export default function Dashboard({
                 key={slice.key}
                 onClick={() => slice.ext && onSelectType(active ? null : slice.ext)}
                 disabled={!slice.ext}
-                className={`flex w-full items-center gap-2 rounded px-1.5 py-1 text-left ${
-                  slice.ext ? "cursor-pointer hover:bg-white/5" : "cursor-default"
-                } ${active ? "bg-white/10" : ""}`}
+                className={`flex w-full items-center gap-2 rounded px-1.5 py-[var(--dl-row-py)] text-left ${
+                  slice.ext ? "cursor-pointer hover:bg-[var(--dl-hover)]" : "cursor-default"
+                } ${active ? "bg-[var(--dl-hover-strong)]" : ""}`}
               >
                 <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: slice.fill }} />
                 <span className="flex-1 truncate">{slice.label}</span>
