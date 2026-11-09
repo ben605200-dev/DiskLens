@@ -13,7 +13,7 @@ use std::fs;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::MetadataExt as WinMetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -673,13 +673,19 @@ fn process_children(children: &mut [jwalk::Result<DirEntry<WalkClientState>>]) {
     }
 }
 
-/// Lower-cased, verbatim-prefixed forms of the excluded paths. The walk's
-/// entry paths are verbatim too because the scan root is canonicalized.
+/// Lower-cased, verbatim-prefixed forms of the excluded paths. Each path is
+/// canonicalized first so exclusions still match the walk's canonical entry
+/// paths when the user picked the folder through a junction, symlink, or
+/// short (8.3) name. Non-existent paths fall back to the given form.
 fn normalize_excluded(paths: &[String]) -> Vec<String> {
     paths
         .iter()
         .map(|p| {
-            let lower = p.trim_end_matches(['\\', '/']).to_lowercase();
+            let source = fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p));
+            let lower = source
+                .to_string_lossy()
+                .trim_end_matches(['\\', '/'])
+                .to_lowercase();
             if lower.starts_with(r"\\?\") {
                 lower
             } else if let Some(rest) = lower.strip_prefix(r"\\") {
