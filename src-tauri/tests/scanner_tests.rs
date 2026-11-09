@@ -4,12 +4,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use disklens_lib::commands::mask_path;
 use disklens_lib::drives::list_drives;
-use disklens_lib::scanner::{ScanProgress, ScanSummary, scan};
+use disklens_lib::scanner::{LastScan, ScanProgress, ScanSummary, scan};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -53,7 +54,7 @@ impl Drop for TestDir {
 
 fn run_scan(root: &Path) -> ScanSummary {
     let cancel = AtomicBool::new(false);
-    scan(root, &cancel, |_| {}).expect("scan failed")
+    scan(root, &cancel, |_| {}, None).expect("scan failed")
 }
 
 fn mklink_junction(link: &Path, target: &Path) -> bool {
@@ -270,7 +271,7 @@ fn cancellation_stops_the_scan() {
     }
 
     let cancel = AtomicBool::new(true); // already cancelled before starting
-    let s = scan(td.path(), &cancel, |_| {}).unwrap();
+    let s = scan(td.path(), &cancel, |_| {}, None).unwrap();
     assert!(s.cancelled);
     assert!(s.file_count < 100);
 }
@@ -279,7 +280,7 @@ fn cancellation_stops_the_scan() {
 fn scanning_a_missing_path_returns_an_error() {
     let cancel = AtomicBool::new(false);
     let missing = std::env::temp_dir().join("disklens-missing-path-for-test");
-    assert!(scan(&missing, &cancel, |_| {}).is_err());
+    assert!(scan(&missing, &cancel, |_| {}, None).is_err());
 }
 
 #[test]
@@ -289,9 +290,14 @@ fn progress_callback_reports_running_totals_and_previews() {
 
     let seen: Mutex<Vec<ScanProgress>> = Mutex::new(Vec::new());
     let cancel = AtomicBool::new(false);
-    let s = scan(td.path(), &cancel, |p| {
-        seen.lock().unwrap().push(p.clone());
-    })
+    let s = scan(
+        td.path(),
+        &cancel,
+        |p| {
+            seen.lock().unwrap().push(p.clone());
+        },
+        None,
+    )
     .unwrap();
 
     let seen = seen.into_inner().unwrap();
@@ -308,6 +314,37 @@ fn progress_callback_reports_running_totals_and_previews() {
         "the root folder should be the largest folder so far"
     );
     assert_eq!(s.file_count, 1);
+}
+
+#[test]
+fn list_children_lists_direct_children_biggest_first() {
+    let td = TestDir::new("children");
+    td.write("small.bin", 100);
+    td.write("big.bin", 500);
+    td.write("sub/one.bin", 800);
+
+    let cancel = AtomicBool::new(false);
+    let last = Arc::new(LastScan::default());
+    assert!(last.list_children("C:\\").is_err(), "no scan stored yet");
+
+    let s = scan(td.path(), &cancel, |_| {}, Some(last.clone())).unwrap();
+
+    let children = last.list_children(&s.root).unwrap();
+    assert_eq!(children.len(), 3);
+    assert_eq!(children[0].name, "sub");
+    assert_eq!(children[0].kind, "folder");
+    assert_eq!(children[0].size, 800);
+    assert_eq!(children[1].name, "big.bin");
+    assert_eq!(children[1].kind, "file");
+    assert_eq!(children[1].is_cloud, Some(false));
+    assert_eq!(children[2].name, "small.bin");
+
+    let inside = last.list_children(&children[0].path).unwrap();
+    assert_eq!(inside.len(), 1);
+    assert_eq!(inside[0].name, "one.bin");
+    assert_eq!(inside[0].size, 800);
+
+    assert!(last.list_children("X:\\does-not-exist").is_err());
 }
 
 #[test]

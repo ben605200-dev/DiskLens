@@ -9,8 +9,11 @@ import DetailPanel from "./components/DetailPanel";
 import { extOf } from "./lib/fileTypes";
 import { formatBytes, formatElapsed } from "./lib/format";
 
-// Charts (recharts is heavy) are only needed once results exist.
+// Charts and the treemap (recharts + d3 are heavy) are only loaded
+// once results exist, which keeps the start screen light.
 const HogsChart = lazy(() => import("./components/HogsChart"));
+const Dashboard = lazy(() => import("./components/Dashboard"));
+const Treemap = lazy(() => import("./components/Treemap"));
 
 const OLD_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -36,6 +39,8 @@ export default function App() {
   // Interaction
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const [selected, setSelected] = useState<HogItem | null>(null);
+  const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [rootView, setRootView] = useState<"dashboard" | "details">("dashboard");
 
   const loadDrives = useCallback(async () => {
     try {
@@ -57,6 +62,7 @@ export default function App() {
         setSummary(event.payload);
         setLive(null);
         setScanning(false);
+        setRootView("dashboard");
       }),
       listen<string>("scan-failed", (event) => {
         setError(event.payload);
@@ -76,6 +82,7 @@ export default function App() {
     setLive(null);
     setSelected(null);
     setHoveredPath(null);
+    setSelectedType(null);
     setScanning(true);
     try {
       await invoke("scan_start", { path: targetPath });
@@ -99,7 +106,14 @@ export default function App() {
     setLive(null);
     setSelected(null);
     setHoveredPath(null);
+    setSelectedType(null);
     setError(null);
+  }
+
+  /** Keeps the type dropdown, donut selection and treemap in sync. */
+  function applyTypeFilter(value: string) {
+    setTypeFilter(value);
+    setSelectedType(value === "all" ? null : value);
   }
 
   // ----- derived data -----------------------------------------------------
@@ -147,6 +161,8 @@ export default function App() {
     return Array.from(exts).sort();
   }, [files]);
 
+  const minBytes = parseFloat(minSizeMb) > 0 ? parseFloat(minSizeMb) * 1024 * 1024 : 0;
+
   const visible = useMemo(() => {
     const base =
       tab === "files"
@@ -155,7 +171,6 @@ export default function App() {
           ? folders
           : [...files, ...folders].sort((a, b) => b.size - a.size);
 
-    const minBytes = parseFloat(minSizeMb) > 0 ? parseFloat(minSizeMb) * 1024 * 1024 : 0;
     const query = search.trim().toLowerCase();
     const now = Date.now();
 
@@ -176,10 +191,19 @@ export default function App() {
       })
       .sort((a, b) => b.size - a.size)
       .slice(0, topN);
-  }, [tab, files, folders, minSizeMb, search, typeFilter, olderOnly, topN]);
+  }, [tab, files, folders, minBytes, search, typeFilter, olderOnly, topN]);
+
+  const rootPath = summary?.root ?? live?.root ?? "";
+  const largestFile = files[0] ?? null;
+  const largestFolder = folders[0] ?? null;
+  const selectedDrive = useMemo(
+    () => drives?.find((d) => rootPath.toLowerCase().startsWith(d.letter.toLowerCase())) ?? null,
+    [drives, rootPath],
+  );
 
   const showStart = !scanning && !summary && !live;
   const showResults = scanning || summary !== null;
+  const showDashboard = rootView === "dashboard" && !scanning && summary !== null;
 
   // ----- rendering --------------------------------------------------------
 
@@ -268,13 +292,51 @@ export default function App() {
             <div className="rounded-md border border-red-900 bg-red-950/50 p-3 text-sm">{error}</div>
           )}
 
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex overflow-hidden rounded-md border border-neutral-700 text-xs">
+              {(["dashboard", "details"] as const).map((view) => (
+                <button
+                  key={view}
+                  onClick={() => setRootView(view)}
+                  disabled={scanning}
+                  className={`px-3 py-1.5 capitalize disabled:opacity-40 ${
+                    rootView === view ? "bg-sky-600" : "bg-neutral-900 hover:bg-neutral-800"
+                  }`}
+                >
+                  {view}
+                </button>
+              ))}
+            </div>
+            {scanning && <span className="text-xs opacity-60">Live results update while scanning</span>}
+          </div>
+
+          {showDashboard && summary && (
+            <Suspense fallback={<div className="p-4 text-sm opacity-60">Loading views...</div>}>
+              <Dashboard
+                summary={summary}
+                drive={selectedDrive}
+                largestFile={largestFile}
+                largestFolder={largestFolder}
+                selectedType={selectedType}
+                onSelectType={(ext) => applyTypeFilter(ext ?? "all")}
+              />
+              <Treemap
+                rootPath={summary.root}
+                selectedType={selectedType}
+                minBytes={minBytes}
+                search={search}
+                onSelect={setSelected}
+              />
+            </Suspense>
+          )}
+
           <Filters
             tab={tab}
             setTab={setTab}
             topN={topN}
             setTopN={setTopN}
             typeFilter={typeFilter}
-            setTypeFilter={setTypeFilter}
+            setTypeFilter={applyTypeFilter}
             typeOptions={typeOptions}
             minSizeMb={minSizeMb}
             setMinSizeMb={setMinSizeMb}

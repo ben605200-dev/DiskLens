@@ -55,6 +55,15 @@ export interface DriveInfo {
   usedBytes: number;
 }
 
+/** Direct child of a folder from the last completed scan (treemap drill-in). */
+export interface ChildOut {
+  path: string;
+  name: string;
+  kind: "file" | "folder" | "link";
+  size: number;
+  isCloud: boolean | null;
+}
+
 export type ItemKind = "file" | "folder";
 
 /** One row shared by the table and the chart. */

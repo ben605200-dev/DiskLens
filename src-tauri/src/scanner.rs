@@ -15,6 +15,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::MetadataExt as WinMetadataExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use jwalk::{DirEntry, WalkDirGeneric};
@@ -29,6 +30,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 /// How many items the largest-files / largest-folders lists keep.
 pub const TOP_N: usize = 100;
+/// Maximum direct children returned per folder for treemap drill-in.
+const MAX_CHILDREN: usize = 500;
 /// Progress events are throttled to this interval.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -113,6 +116,26 @@ pub struct ScanSummary {
     pub top_folders: Vec<FolderOut>,
 }
 
+/// One direct child of a folder, for treemap drill-in.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildOut {
+    pub path: String,
+    pub name: String,
+    /// "file", "folder" or "link" (junction/symlink, never followed).
+    pub kind: String,
+    pub size: u64,
+    /// Only set for files: true when the file is a OneDrive-style placeholder.
+    pub is_cloud: Option<bool>,
+}
+
+/// The most recent scanned tree, kept in memory so views can drill into it
+/// without re-scanning. Shared between the scan thread and commands.
+#[derive(Default)]
+pub struct LastScan {
+    tree: Mutex<Option<Tree>>,
+}
+
 /// Per-entry data captured inside the parallel walkers (never stores paths).
 #[derive(Debug, Default, Clone)]
 struct EntryInfo {
@@ -134,12 +157,10 @@ struct Node {
     name_off: u32,
     name_len: u32,
     kind: u8,
-    /// Bit 0: cloud (OneDrive placeholder) file. Read by upcoming views.
-    #[allow(dead_code)]
+    /// Bit 0: cloud (OneDrive placeholder) file.
     flags: u8,
     first_child: u32,
-    /// Child linked list, walked by upcoming views (treemap/detail).
-    #[allow(dead_code)]
+    /// Child linked list used by treemap drill-in and detail views.
     next_sibling: u32,
     parent: u32,
     size: u64,
@@ -148,6 +169,8 @@ struct Node {
 struct Tree {
     nodes: Vec<Node>,
     names: String,
+    /// Root's full display path (verbatim prefix stripped).
+    name: String,
 }
 
 impl Tree {
@@ -155,6 +178,7 @@ impl Tree {
         Tree {
             nodes: Vec::new(),
             names: String::new(),
+            name: String::new(),
         }
     }
 
@@ -180,6 +204,9 @@ impl Tree {
         });
         if parent != NO_INDEX {
             self.nodes[parent as usize].first_child = idx;
+        } else {
+            // The root stores its full path as its name.
+            self.name = name.to_string();
         }
         idx
     }
@@ -215,6 +242,76 @@ impl Tree {
             }
         }
         strip_verbatim(&out)
+    }
+}
+
+impl LastScan {
+    fn store(&self, tree: Tree) {
+        *self.tree.lock().unwrap() = Some(tree);
+    }
+
+    /// Lists a folder's direct children, biggest first. `path` must equal a
+    /// rebuilt path inside the stored tree (the scan root or any folder
+    /// below it, as displayed by the UI).
+    pub fn list_children(&self, path: &str) -> Result<Vec<ChildOut>, String> {
+        let target = path.trim_end_matches(['\\', '/']).to_lowercase();
+        let guard = self.tree.lock().unwrap();
+        let tree = guard.as_ref().ok_or("no scan results available")?;
+
+        let matches = |idx: u32| {
+            tree.nodes[idx as usize].kind == KIND_DIR
+                && tree
+                    .path_of(idx)
+                    .trim_end_matches(['\\', '/'])
+                    .to_lowercase()
+                    == target
+        };
+
+        let mut node = 0u32;
+        loop {
+            if tree.nodes.is_empty() {
+                return Err("no scan results available".to_string());
+            }
+            if matches(node) {
+                break;
+            }
+            let mut found = None;
+            let mut child = tree.nodes[node as usize].first_child;
+            while child != NO_INDEX {
+                if matches(child) {
+                    found = Some(child);
+                    break;
+                }
+                child = tree.nodes[child as usize].next_sibling;
+            }
+            node = found.ok_or("folder not found in the current scan")?;
+        }
+
+        let mut out = Vec::new();
+        let mut child = tree.nodes[node as usize].first_child;
+        while child != NO_INDEX {
+            let n = &tree.nodes[child as usize];
+            out.push(ChildOut {
+                path: tree.path_of(child),
+                name: tree.name(child).to_string(),
+                kind: match n.kind {
+                    KIND_DIR => "folder",
+                    KIND_FILE => "file",
+                    _ => "link",
+                }
+                .to_string(),
+                size: n.size,
+                is_cloud: if n.kind == KIND_FILE {
+                    Some(n.flags & FLAG_CLOUD != 0)
+                } else {
+                    None
+                },
+            });
+            child = n.next_sibling;
+        }
+        out.sort_by(|a, b| b.size.cmp(&a.size).then(a.name.cmp(&b.name)));
+        out.truncate(MAX_CHILDREN);
+        Ok(out)
     }
 }
 
@@ -423,9 +520,10 @@ impl ScanCtx {
         }
     }
 
-    /// Builds the final summary. Folder totals were kept up to date
-    /// incrementally while files were added.
-    fn finish(self, elapsed_ms: u64) -> ScanSummary {
+    /// Builds the final summary and hands the tree back so it can be kept
+    /// for drill-in views. Folder totals were kept up to date incrementally
+    /// while files were added.
+    fn finish(self, elapsed_ms: u64) -> (Tree, ScanSummary) {
         let root = self.root.clone();
         let top_folders = self.folder_preview();
 
@@ -449,7 +547,7 @@ impl ScanCtx {
             })
             .collect();
 
-        ScanSummary {
+        let summary = ScanSummary {
             cancelled: self.cancelled,
             root,
             total_bytes: self.bytes_counted,
@@ -463,14 +561,27 @@ impl ScanCtx {
             by_type,
             top_files,
             top_folders,
-        }
+        };
+        (self.tree, summary)
+    }
+}
+
+fn store_last_scan(last_scan: &Option<Arc<LastScan>>, tree: Tree) {
+    if let Some(shared) = last_scan {
+        shared.store(tree);
     }
 }
 
 /// Runs a full scan of `root`. `on_progress` is called at most every 200 ms
 /// (on the calling thread) with a small snapshot; `cancel` stops the walk
-/// within about a second. Returns partial results when cancelled.
-pub fn scan<F>(root: &Path, cancel: &AtomicBool, on_progress: F) -> io::Result<ScanSummary>
+/// within about a second. Returns partial results when cancelled. When
+/// `last_scan` is given, the finished tree is stored there for drill-in.
+pub fn scan<F>(
+    root: &Path,
+    cancel: &AtomicBool,
+    on_progress: F,
+    last_scan: Option<Arc<LastScan>>,
+) -> io::Result<ScanSummary>
 where
     F: Fn(&ScanProgress),
 {
@@ -489,7 +600,9 @@ where
 
     if cancel.load(AtomicOrdering::Relaxed) {
         ctx.cancelled = true;
-        return Ok(ctx.finish(start.elapsed().as_millis() as u64));
+        let (tree, summary) = ctx.finish(start.elapsed().as_millis() as u64);
+        store_last_scan(&last_scan, tree);
+        return Ok(summary);
     }
 
     let walk = WalkDirGeneric::<WalkClientState>::new(&root)
@@ -514,12 +627,15 @@ where
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
     on_progress(&ctx.progress(start));
-    Ok(ctx.finish(elapsed_ms))
+    let (tree, summary) = ctx.finish(elapsed_ms);
+    store_last_scan(&last_scan, tree);
+    Ok(summary)
 }
 
 /// Runs for every directory in parallel, before its children are read.
-/// Junctions/symlinks are pinned so they are never descended into; plain
-/// files are inspected once, here, so the serial consumer does no I/O.
+/// Plain files are inspected once, here, so the serial consumer does no I/O.
+/// Junctions/symlinks are never descended by jwalk (and are reported as
+/// symlinks by std), so their `read_children` stays None on its own.
 fn process_children(
     _depth: Option<usize>,
     _path: &Path,
@@ -528,9 +644,7 @@ fn process_children(
 ) {
     for child in children.iter_mut() {
         let Ok(entry) = child else { continue };
-        if entry.file_type().is_symlink() {
-            entry.read_children = None;
-        } else if !entry.file_type().is_dir() {
+        if !entry.file_type().is_dir() && !entry.file_type().is_symlink() {
             entry.client_state = Some(probe_file(&entry.path()));
         }
     }

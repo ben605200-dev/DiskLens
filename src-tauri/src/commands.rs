@@ -8,11 +8,14 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter, State};
 
-use crate::scanner;
+use crate::scanner::{self, LastScan};
 
 /// Cancel flag of the currently running scan, if any.
 #[derive(Default)]
 pub struct ScanState(pub Mutex<Option<Arc<AtomicBool>>>);
+
+/// Shared handle to the most recent scanned tree (for drill-in views).
+pub struct LastScanState(pub Arc<LastScan>);
 
 /// Starts a scan of `path` in the background. Emits `scan-progress`,
 /// `scan-finished` (with the summary) or `scan-failed` events.
@@ -20,6 +23,7 @@ pub struct ScanState(pub Mutex<Option<Arc<AtomicBool>>>);
 pub async fn scan_start(
     app: AppHandle,
     state: State<'_, ScanState>,
+    last_scan: State<'_, LastScanState>,
     path: String,
 ) -> Result<(), String> {
     let root = PathBuf::from(&path);
@@ -37,12 +41,18 @@ pub async fn scan_start(
         *guard = Some(flag.clone());
     }
 
+    let shared_tree = last_scan.0.clone();
     let app_handle = app.clone();
     std::thread::spawn(move || {
         let progress_app = app_handle.clone();
-        let result = scanner::scan(&root, &flag, move |progress| {
-            let _ = progress_app.emit("scan-progress", progress);
-        });
+        let result = scanner::scan(
+            &root,
+            &flag,
+            move |progress| {
+                let _ = progress_app.emit("scan-progress", progress);
+            },
+            Some(shared_tree),
+        );
         match result {
             Ok(summary) => {
                 let _ = app_handle.emit("scan-finished", &summary);
@@ -63,6 +73,17 @@ pub fn scan_cancel(state: State<'_, ScanState>) -> Result<(), String> {
         flag.store(true, Ordering::Relaxed);
     }
     Ok(())
+}
+
+/// Lists a folder's direct children from the last completed scan, biggest
+/// first (capped at 500). Used by the treemap to drill into folders without
+/// re-scanning and without ever sending the full file list.
+#[tauri::command]
+pub fn list_children(
+    last_scan: State<'_, LastScanState>,
+    path: String,
+) -> Result<Vec<scanner::ChildOut>, String> {
+    last_scan.0.list_children(&path)
 }
 
 /// Replaces the user profile prefix with `%USERPROFILE%`, so paths copied

@@ -1,4 +1,4 @@
-import type { HogItem } from "../types";
+import type { ChildOut, HogItem } from "../types";
 
 /** Extension → coarse group. Kept small on purpose. */
 const EXT_GROUPS: Array<[string, string[]]> = [
@@ -68,4 +68,34 @@ export function colorForItem(item: Pick<HogItem, "kind" | "name">): string {
 export function iconForItem(item: Pick<HogItem, "kind" | "name">): string {
   if (item.kind === "folder") return "📁";
   return GROUP_ICONS[groupOfExt(extOf(item.name))] ?? GROUP_ICONS.other;
+}
+
+/** Color for a treemap block (also handles links). */
+export function treemapColor(kind: ChildOut["kind"], name: string, isCloud?: boolean | null): string {
+  if (kind === "link") return "#8A6D3B";
+  if (kind === "folder") return FOLDER_COLOR;
+  if (isCloud) return "#7DD3FC";
+  return colorForItem({ kind: "file", name });
+}
+
+/**
+ * Deterministic diagonal stripe pattern (never rely on color alone):
+ * pattern index cycles 0..2 by case-insensitive name.
+ */
+export function patternIndexFor(name: string): number {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.toLowerCase().charCodeAt(i)) >>> 0;
+  }
+  return hash % 3;
+}
+
+/** SVG fill for an overlay: a subtle white diagonal stripe pattern. */
+export function patternFill(index: number): string {
+  return `url(#dl-pattern-${index})`;
+}
+
+/** Color for a file extension (used by the type donut). */
+export function colorForExt(ext: string): string {
+  return GROUP_COLORS[groupOfExt(ext)] ?? GROUP_COLORS.other;
 }
