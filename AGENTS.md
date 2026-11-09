@@ -18,7 +18,7 @@ DiskLens: open-source Windows 11 desktop app that scans a drive or folder and sh
 - Never put real usernames, real paths, machine names, emails, or tokens anywhere (code, tests, docs, commits). Use fake paths like C:\Users\Example\.
 - Mask the Windows username in any exported or copied text (use %USERPROFILE%).
 - Use only my GitHub handle: ben605200-dev. Never write an email address anywhere.
-- Never push, publish, or change GitHub settings. Only tell me what to run.
+- Never push, publish, or change GitHub settings on your own. Do these only when the user explicitly requests that action in the current message; otherwise, only tell the user what to run.
 
 ## WINDOWS HANDLING
 - Do not follow junctions, symlinks, or reparse points (no infinite loops, no double counting).
