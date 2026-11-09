@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in DiskLens does not work as expected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **Do not paste personal paths, usernames, or machine names.**
+        > Replace them before posting, for example:
+        > `C:\Users\Example\Downloads\video.mp4`.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: DiskLens version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: drive-size
+    attributes:
+      label: Drive size
+      description: Total capacity of the drive you scanned (or tried to scan).
+      placeholder: "512 GB"
+    validations:
+      required: true
+  - type: dropdown
+    id: drive-type
+    attributes:
+      label: Drive type
+      options:
+        - SSD
+        - HDD
+        - External / USB
+        - Network
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: file-count
+    attributes:
+      label: Approximate file count
+      description: The number DiskLens shows next to "Files" for the scan, or your best estimate.
+      placeholder: "1.2 million"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots or extra context. Remember to hide personal paths.
+    validations:
+      required: false

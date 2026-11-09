@@ -348,11 +348,13 @@ fn settings_roundtrip_and_corrupt_file_fallback() {
     assert!(!defaults.reduce_motion);
 
     // Roundtrip.
-    let mut custom = Settings::default();
-    custom.theme = "dark".to_string();
-    custom.default_top_n = 50;
-    custom.excluded_paths = vec!["C:\\Users\\Example\\Downloads\\junk".to_string()];
-    custom.reduce_motion = true;
+    let custom = Settings {
+        theme: "dark".to_string(),
+        default_top_n: 50,
+        excluded_paths: vec!["C:\\Users\\Example\\Downloads\\junk".to_string()],
+        reduce_motion: true,
+        ..Settings::default()
+    };
     save_to(&file, &custom).unwrap();
     let loaded = load_from(&file);
     assert_eq!(loaded.theme, "dark");

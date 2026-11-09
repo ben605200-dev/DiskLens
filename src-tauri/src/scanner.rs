@@ -664,7 +664,7 @@ where
 /// children are read) so the serial consumer does no I/O.
 /// Junctions/symlinks are never descended by jwalk (and are reported as
 /// symlinks by std), so their `read_children` stays None on its own.
-fn process_children(children: &mut Vec<jwalk::Result<DirEntry<WalkClientState>>>) {
+fn process_children(children: &mut [jwalk::Result<DirEntry<WalkClientState>>]) {
     for child in children.iter_mut() {
         let Ok(entry) = child else { continue };
         if !entry.file_type().is_dir() && !entry.file_type().is_symlink() {
