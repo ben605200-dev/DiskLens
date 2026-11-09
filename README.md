@@ -11,6 +11,16 @@ on your drive: the biggest files and folders, ranked, graphed, and mapped.
 - **Treemap:** drill into folders with breadcrumbs, tooltips, and color-blind-safe colors plus labels and patterns.
 - **Windows-aware:** junctions and symlinks are never followed, hard links are counted once, OneDrive placeholders are marked and never downloaded, paths over 260 characters work, and permission-denied folders are reported as skipped.
 
+## Download
+
+Grab the latest build from the [Releases page](https://github.com/ben605200-dev/DiskLens/releases):
+
+- **DiskLens_0.x.y_x64-setup.exe** - NSIS installer (per-user, no admin required)
+- **DiskLens_0.x.y_x64-portable.exe** - portable, just run it
+
+Builds are not code-signed yet, so SmartScreen may show an "unknown publisher"
+warning.
+
 ## How it works
 
 The Rust backend walks the drive in parallel and builds a compact in-memory tree.
